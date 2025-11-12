@@ -147,12 +147,25 @@ class Program
             Tiles3DExtensions.RegisterExtensions();
 
             // Determine translation based on projection units and keepProjection flag
-            // If projection is in meters (and not keepProjection), use ECEF translation
-            // This allows geometries to stay in source CRS while properly positioning in 3D world
+            // If projection is in meters (and not keepProjection), we need to transform center to WGS84 first
             var useEcefTransform = !keepProjection && isProjectionInMeters;
-            var translation = keepProjection ?
-                [(double)center.X, (double)center.Y, 0] :
-                Translation.ToEcef(center);
+            
+            double[] translation;
+            if (keepProjection) {
+                // Local coordinates
+                translation = [(double)center.X, (double)center.Y, 0];
+            }
+            else if (useEcefTransform) {
+                // For meter-based projections: transform center to WGS84, then to ECEF
+                var centerWgs84 = BoundingBoxRepository.GetCenterInWgs84(conn, inputTable.TableName, inputTable.GeometryColumn, source_epsg, where);
+                translation = Translation.ToEcef(centerWgs84);
+                Console.WriteLine($"Center in WGS84: {centerWgs84.X}, {centerWgs84.Y}");
+            }
+            else {
+                // For degree-based projections: center is already in WGS84, convert to ECEF
+                translation = Translation.ToEcef(center);
+            }
+            
             Console.WriteLine($"Translation: {String.Join(',', translation)}");
             Console.WriteLine($"Use ECEF transform in tileset: {useEcefTransform}");
 
