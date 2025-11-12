@@ -70,6 +70,31 @@ public class TreeSerializerTests
     }
 
     [Test]
+    public void SerializeToImplicitTilingTestWithEcefTransform()
+    {
+        // arrange
+        var translation = new double[] { 3771793.9699999997, 319574.77100000009, 5087988.9760000007 };
+        var bbox = new double[] { 153000, 463000, 154000, 464000, 0, 100 };
+        // act - useEcefTransform=true means: use box bounding volume and ECEF transform
+        var json = TreeSerializer.ToImplicitTileset(translation, bbox, 500, 2, crs: "", keepProjection: false, useEcefTransform: true);
+        // assert
+        Assert.That(json != null, Is.True);
+        // When crs is empty, it should be null or empty in the asset
+        Assert.That(string.IsNullOrEmpty(json.asset.crs), Is.True);
+        // When useEcefTransform is true, we use boundingVolume box (like keepProjection)
+        Assert.That(json.root.boundingVolume.box, Is.Not.Null);
+        Assert.That(json.root.boundingVolume.region, Is.Null);
+
+        var box = json.root.boundingVolume.box;
+        Assert.That(box.Length, Is.EqualTo(12));
+        
+        // Transform should be ECEF coordinates (not local 0,0,0)
+        Assert.That(json.root.transform[12], Is.EqualTo(translation[0]));
+        Assert.That(json.root.transform[13], Is.EqualTo(translation[1]));
+        Assert.That(json.root.transform[14], Is.EqualTo(translation[2]));
+    }
+
+    [Test]
     public void SerializeToImplicitTilingTest()
     {
         // arrange
