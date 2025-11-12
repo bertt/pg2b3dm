@@ -330,15 +330,7 @@ When the input geometries are distributed in a flat area (like buildings in a ci
 
 OCTREE is used when the input geometries are distributed in a cube-like area.
 
-OCTREE tiling schema is currently in development.
-
-Most features are supported when using OCTREE subdivsion, except:
-
-- Explicting tiling;
-
-- LOD support;
-
-- Creating multiple subtree files.
+Most features are supported when using OCTREE subdivision, except LOD support;
 
 ## Query parameter
 
@@ -550,6 +542,8 @@ Press F5 to start debugging.
 - Wkx (https://github.com/cschwarz/wkx-sharp) - for geometry handling.
 
 ## History
+
+2025-11-12: release 2.24.0: add support OCTREE subdivision with explicit tiling
 
 2025-11-06: release 2.23.1: fix octree subdivision ath higher z-levels visibility
 

@@ -28,11 +28,6 @@ class Program
 
             // Octree checks 
             if(o.subdivisionScheme == SubdivisionScheme.OCTREE) {
-                if (o.UseImplicitTiling == false) {
-                    Console.WriteLine("Warning: Octree subdivision scheme is only supported with implicit tiling.");
-                    Console.WriteLine("Program will exit now.");
-                    return;
-                }
                 if(o.LodColumn != String.Empty) {
                     Console.WriteLine("Warning: parameter -l --lodcolumn is ignored with octree subdivision scheme");
                     o.LodColumn = String.Empty;
@@ -230,7 +225,8 @@ class Program
             };
 
             var outputFolder = o.Output;
-            var outputSettings = OutputDirectoryCreator.GetFolders(outputFolder);
+            var createSubtreeFolder = useImplicitTiling;
+            var outputSettings = OutputDirectoryCreator.GetFolders(outputFolder, createSubtreeFolder);
             var tilesetSettings = new TilesetSettings();
             tilesetSettings.OutputSettings = outputSettings;
             tilesetSettings.Version = version;
@@ -250,6 +246,7 @@ class Program
             tilingSettings.CreateGltf = createGltf;
             tilingSettings.KeepProjection = keepProjection;
             tilingSettings.UseEcefTransform = useEcefTransform;
+            tilingSettings.UseImplicitTiling = useImplicitTiling;
             tilingSettings.SkipCreateTiles = skipCreateTiles;
             tilingSettings.MaxFeaturesPerTile = maxFeaturesPerTile;
             tilingSettings.Lods = lods;
@@ -277,16 +274,28 @@ class Program
         var rootTile3D = new Tile3D(0, 0, 0, 0);
 
         var octreeTiler = new OctreeTiler(conn, inputTable, tilingSettings, stylingSettings, tilesetSettings);
-        var tiles3D = octreeTiler.GenerateTiles3D(bbox3D, 0, rootTile3D, new List<Tile3D>());
-        var mortonIndices = MortonIndex.GetMortonIndices3D(tiles3D);
+        
+        var tileBounds = new Dictionary<string, BoundingBox3D>();
+        var tiles3D = octreeTiler.GenerateTiles3D(bbox3D, 0, rootTile3D, new List<Tile3D>(), tileBounds);
+        
+        Console.WriteLine();
+        Console.WriteLine("Tiles created: " + tiles3D.Count(tile => tile.Available));
 
-        var subtreeFiles = SubtreeCreator3D.GenerateSubtreefiles(tiles3D);
-        var subtreeLevels = CesiumTiler.CreateSubtreeFiles3D(tilesetSettings.OutputSettings, tiles3D);
-
-        tilesetSettings.SubtreeLevels = subtreeLevels;
-
-        // todo add explicit tileset option
-        CesiumTiler.CreateImplicitTileset(tilesetSettings, tilingSettings.CreateGltf, tilingSettings.KeepProjection, tilingSettings.UseEcefTransform);
+        if (tiles3D.Count(tile => tile.Available) > 0) {
+            if (tilingSettings.UseImplicitTiling) {
+                var mortonIndices = MortonIndex.GetMortonIndices3D(tiles3D);
+                var subtreeFiles = SubtreeCreator3D.GenerateSubtreefiles(tiles3D);
+                var subtreeLevels = CesiumTiler.CreateSubtreeFiles3D(tilesetSettings.OutputSettings, tiles3D);
+                tilesetSettings.SubtreeLevels = subtreeLevels;
+                CesiumTiler.CreateImplicitTileset(tilesetSettings, tilingSettings.CreateGltf, tilingSettings.KeepProjection, tilingSettings.UseEcefTransform);
+            }
+            else {
+                CesiumTiler.CreateExplicitTilesetsJson3D(tilesetSettings.Version, tilesetSettings.OutputSettings.OutputFolder, tilesetSettings.Translation,
+                    tilesetSettings.GeometricError, tilesetSettings.GeometricErrorFactor,
+                    tilesetSettings.Refinement, tilesetSettings.RootBoundingVolumeRegion,
+                    rootTile3D, tiles3D, tileBounds, tilingSettings.CreateGltf, tilesetSettings.TilesetVersion, tilesetSettings.Crs);
+            }
+        }
     }
 
     private static void QuadtreeTile(NpgsqlConnection conn, InputTable inputTable, StylingSettings stylingSettings, TilesetSettings tilesetSettings, TilingSettings tilingSettings)
