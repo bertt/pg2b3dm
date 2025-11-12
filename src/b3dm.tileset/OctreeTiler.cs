@@ -30,7 +30,7 @@ public class OctreeTiler
     {
         var where = inputTable.GetQueryClause();
 
-        var numberOfFeatures = FeatureCountRepository.CountFeaturesInBox(conn, inputTable.TableName, inputTable.GeometryColumn, new Point(bbox.XMin, bbox.YMin, bbox.ZMin), new Point(bbox.XMax, bbox.YMax, bbox.ZMax), where, inputTable.EPSGCode, tilingSettings.KeepProjection);
+        var numberOfFeatures = FeatureCountRepository.CountFeaturesInBox(conn, inputTable.TableName, inputTable.GeometryColumn, new Point(bbox.XMin, bbox.YMin, bbox.ZMin), new Point(bbox.XMax, bbox.YMax, bbox.ZMax), where, inputTable.EPSGCode, tilingSettings.KeepProjection || tilingSettings.UseEcefTransform);
         if (numberOfFeatures == 0) {
             var t2 = new Tile3D(level, tile.X, tile.Y, tile.Z);
             t2.Available = false;
@@ -66,12 +66,12 @@ public class OctreeTiler
 
             int target_srs = 4978;
 
-            if (tilingSettings.KeepProjection) {
+            if (tilingSettings.KeepProjection || tilingSettings.UseEcefTransform) {
                 target_srs = inputTable.EPSGCode;
             }
 
             var bbox1 = new double[] { bbox.XMin, bbox.YMin, bbox.XMax, bbox.YMax, bbox.ZMin, bbox.ZMax };
-            var geometries = GeometryRepository.GetGeometrySubset(conn, inputTable.TableName, inputTable.GeometryColumn, bbox1, inputTable.EPSGCode, target_srs, inputTable.ShadersColumn, inputTable.AttributeColumns, where, inputTable.RadiusColumn, tilingSettings.KeepProjection);
+            var geometries = GeometryRepository.GetGeometrySubset(conn, inputTable.TableName, inputTable.GeometryColumn, bbox1, inputTable.EPSGCode, target_srs, inputTable.ShadersColumn, inputTable.AttributeColumns, where, inputTable.RadiusColumn, tilingSettings.KeepProjection, tilingSettings.UseEcefTransform);
 
             if (geometries.Count > 0) {
 

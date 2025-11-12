@@ -16,6 +16,35 @@ public static class BoundingBoxRepository
         return bbox3d;
     }
 
+    public static Point GetCenterInWgs84(IDbConnection conn, string geometry_table, string geometry_column, int source_epsg, string query = "")
+    {
+        // Get the center point of the bounding box transformed to WGS84 (EPSG:4326)
+        var sql = $@"
+            SELECT 
+                ST_X(center_wgs84) as lon,
+                ST_Y(center_wgs84) as lat
+            FROM (
+                SELECT ST_Transform(
+                    ST_Centroid(ST_3DExtent({geometry_column})),
+                    4326
+                ) as center_wgs84
+                FROM {geometry_table}
+                {query}
+            ) as subquery";
+        
+        conn.Open();
+        var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        var reader = cmd.ExecuteReader();
+        reader.Read();
+        var lon = reader.GetDouble(0);
+        var lat = reader.GetDouble(1);
+        var center = new Point(lon, lat);
+        reader.Close();
+        conn.Close();
+        return center;
+    }
+
     private static (BoundingBox, double, double) GetBounds(IDbConnection conn, string sql)
     {
         conn.Open();

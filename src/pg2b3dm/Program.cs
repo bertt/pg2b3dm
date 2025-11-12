@@ -94,6 +94,10 @@ class Program
             Console.WriteLine($"Spatial reference of {inputTable.TableName}.{inputTable.GeometryColumn}: {source_epsg}");
             inputTable.EPSGCode = source_epsg;
 
+            // Check if projection uses meters
+            var isProjectionInMeters = ProjectionUnitChecker.IsProjectionInMeters(conn, source_epsg);
+            Console.WriteLine($"Projection uses meters: {isProjectionInMeters}");
+
             // Check spatialIndex
             var hasSpatialIndex = SpatialIndexChecker.HasSpatialIndex(conn, inputTable.TableName, inputTable.GeometryColumn);
             if (!hasSpatialIndex) {
@@ -115,7 +119,7 @@ class Program
             Console.WriteLine($"Query bounding box of {inputTable.TableName}.{inputTable.GeometryColumn}...");
             var where = (inputTable.Query != string.Empty ? $" where {inputTable.Query}" : String.Empty);
 
-            var bbox_table = BoundingBoxRepository.GetBoundingBoxForTable(conn, inputTable.TableName, inputTable.GeometryColumn, keepProjection, where);
+            var bbox_table = BoundingBoxRepository.GetBoundingBoxForTable(conn, inputTable.TableName, inputTable.GeometryColumn, keepProjection || isProjectionInMeters, where);
             var bbox = bbox_table.bbox;
             var zmin = bbox_table.zmin;
             var zmax = bbox_table.zmax;
@@ -142,10 +146,34 @@ class Program
 
             Tiles3DExtensions.RegisterExtensions();
 
-            var translation = keepProjection ?
-                [(double)center.X, (double)center.Y, 0] :
-                Translation.ToEcef(center);
-            Console.WriteLine($"Translation: {String.Join(',', translation)}");
+            // Determine translation/transformation based on projection units and keepProjection flag
+            var useEcefTransform = !keepProjection && isProjectionInMeters;
+            
+            double[] translation;
+            if (keepProjection) {
+                // Local coordinates - simple translation
+                translation = [(double)center.X, (double)center.Y, 0];
+            }
+            else if (useEcefTransform) {
+                // For meter-based projections: use full ENU to ECEF transformation matrix
+                // This includes rotation to align local coordinates with Earth's surface
+                var centerWgs84 = BoundingBoxRepository.GetCenterInWgs84(conn, inputTable.TableName, inputTable.GeometryColumn, source_epsg, where);
+                translation = Translation.GetEnuToEcefTransform(centerWgs84);
+                Console.WriteLine($"Center in WGS84: {centerWgs84.X}, {centerWgs84.Y}");
+                Console.WriteLine($"Using full ENU to ECEF transformation matrix");
+            }
+            else {
+                // For degree-based projections: center is already in WGS84, simple ECEF translation
+                translation = Translation.ToEcef(center);
+            }
+            
+            if (translation.Length == 3) {
+                Console.WriteLine($"Translation: {String.Join(',', translation)}");
+            } else {
+                // For 16-element matrix, just show the translation part
+                Console.WriteLine($"Transform translation: {translation[12]}, {translation[13]}, {translation[14]}");
+            }
+            Console.WriteLine($"Use ECEF transform in tileset: {useEcefTransform}");
 
             var lodcolumn = o.LodColumn;
             var addOutlines = (bool)o.AddOutlines;
@@ -184,7 +212,7 @@ class Program
             }
 
             var rootBoundingVolumeRegion =
-                keepProjection ?
+                keepProjection || useEcefTransform ?
                     bbox.ToRegion(zmin, zmax) :
                     bbox.ToRadians().ToRegion(zmin, zmax);
 
@@ -221,6 +249,7 @@ class Program
             tilingSettings.BoundingBox = bbox;
             tilingSettings.CreateGltf = createGltf;
             tilingSettings.KeepProjection = keepProjection;
+            tilingSettings.UseEcefTransform = useEcefTransform;
             tilingSettings.SkipCreateTiles = skipCreateTiles;
             tilingSettings.MaxFeaturesPerTile = maxFeaturesPerTile;
             tilingSettings.Lods = lods;
@@ -257,7 +286,7 @@ class Program
         tilesetSettings.SubtreeLevels = subtreeLevels;
 
         // todo add explicit tileset option
-        CesiumTiler.CreateImplicitTileset(tilesetSettings, tilingSettings.CreateGltf, tilingSettings.KeepProjection);
+        CesiumTiler.CreateImplicitTileset(tilesetSettings, tilingSettings.CreateGltf, tilingSettings.KeepProjection, tilingSettings.UseEcefTransform);
     }
 
     private static void QuadtreeTile(NpgsqlConnection conn, InputTable inputTable, StylingSettings stylingSettings, TilesetSettings tilesetSettings, TilingSettings tilingSettings)
@@ -268,7 +297,7 @@ class Program
         var outputSettings = tilesetSettings.OutputSettings;
 
         var quadtreeTiler = new QuadtreeTiler(conn, inputTable, stylingSettings, tilingSettings.MaxFeaturesPerTile, tilesetSettings.Translation, outputSettings.ContentFolder, tilingSettings.Lods, tilesetSettings.Copyright, tilingSettings.SkipCreateTiles);
-        var tiles = quadtreeTiler.GenerateTiles(bbox, tile, new List<Tile>(), inputTable.LodColumn != string.Empty ? tilingSettings.Lods.First() : 0, tilingSettings.CreateGltf, tilingSettings.KeepProjection);
+        var tiles = quadtreeTiler.GenerateTiles(bbox, tile, new List<Tile>(), inputTable.LodColumn != string.Empty ? tilingSettings.Lods.First() : 0, tilingSettings.CreateGltf, tilingSettings.KeepProjection, tilingSettings.UseEcefTransform);
         Console.WriteLine();
         Console.WriteLine("Tiles created: " + tiles.Count(tile => tile.Available));
 
@@ -276,7 +305,7 @@ class Program
             if (tilingSettings.UseImplicitTiling) {
                 var subtreeLevels = CesiumTiler.CreateSubtreeFiles(outputSettings, tiles);
                 tilesetSettings.SubtreeLevels = subtreeLevels;
-                CesiumTiler.CreateImplicitTileset(tilesetSettings, tilingSettings.CreateGltf, tilingSettings.KeepProjection);
+                CesiumTiler.CreateImplicitTileset(tilesetSettings, tilingSettings.CreateGltf, tilingSettings.KeepProjection, tilingSettings.UseEcefTransform);
             }
             else {
                 CesiumTiler.CreateExplicitTilesetsJson(tilesetSettings.Version, outputSettings.OutputFolder, tilesetSettings.Translation, 

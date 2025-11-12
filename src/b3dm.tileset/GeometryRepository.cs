@@ -38,15 +38,15 @@ public static class GeometryRepository
         return result;
     }
 
-    public static List<GeometryRecord> GetGeometrySubset(NpgsqlConnection conn, string geometry_table, string geometry_column, double[] bbox, int source_epsg, int target_srs, string shaderColumn = "", string attributesColumns = "", string query = "", string radiusColumn = "", bool keepProjection = false)
+    public static List<GeometryRecord> GetGeometrySubset(NpgsqlConnection conn, string geometry_table, string geometry_column, double[] bbox, int source_epsg, int target_srs, string shaderColumn = "", string attributesColumns = "", string query = "", string radiusColumn = "", bool keepProjection = false, bool useEcefTransform = false)
     {
-        var sqlselect = GetSqlSelect(geometry_column, shaderColumn, attributesColumns, radiusColumn, target_srs);
+        var sqlselect = GetSqlSelect(geometry_column, shaderColumn, attributesColumns, radiusColumn, target_srs, useEcefTransform);
         var sqlFrom = "FROM " + geometry_table;
 
         // todo: fix unit test when there is no z
         var points = GetPoints(bbox);
 
-        var sqlWhere = GetWhere(geometry_column, points.fromPoint, points.toPoint, query, source_epsg, keepProjection);
+        var sqlWhere = GetWhere(geometry_column, points.fromPoint, points.toPoint, query, source_epsg, keepProjection || useEcefTransform);
         var sql = sqlselect + sqlFrom + " where " + sqlWhere;
 
         var geometries = GetGeometries(conn, shaderColumn, attributesColumns, sql, radiusColumn);
@@ -85,9 +85,9 @@ public static class GeometryRepository
         return where;
     }
 
-    public static string GetSqlSelect(string geometry_column, string shaderColumn, string attributesColumns, string radiusColumn, int target_srs)
+    public static string GetSqlSelect(string geometry_column, string shaderColumn, string attributesColumns, string radiusColumn, int target_srs, bool useEcefTransform = false)
     {
-        var g = GetGeometryColumn(geometry_column, target_srs);
+        var g = GetGeometryColumn(geometry_column, target_srs, useEcefTransform);
         var sqlselect = $"SELECT ST_AsBinary({g})";
         if (shaderColumn != String.Empty) {
             sqlselect = $"{sqlselect}, {shaderColumn} ";
@@ -102,8 +102,12 @@ public static class GeometryRepository
         return sqlselect;
     }
 
-    public static string GetGeometryColumn(string geometry_column, int target_srs)
+    public static string GetGeometryColumn(string geometry_column, int target_srs, bool useEcefTransform = false)
     {
+        // When useEcefTransform is true, we don't transform geometries - the transform is applied in tileset.json
+        if (useEcefTransform) {
+            return geometry_column;
+        }
         return $"st_transform({geometry_column}, {target_srs})";
     }
 

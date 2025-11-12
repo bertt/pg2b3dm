@@ -70,6 +70,46 @@ public class TreeSerializerTests
     }
 
     [Test]
+    public void SerializeToImplicitTilingTestWithEcefTransform()
+    {
+        // arrange - Create a full ENU to ECEF transformation matrix (16 elements)
+        // This represents a proper transformation including rotation and translation
+        var fullTransform = new double[] {
+            -0.5, 0.5, 0.707, 0.0,      // Column 0 (East in ECEF)
+            -0.5, -0.5, 0.707, 0.0,     // Column 1 (North in ECEF)
+            0.707, 0.707, 0.0, 0.0,     // Column 2 (Up in ECEF)
+            3771793.97, 319574.77, 5087988.98, 1.0  // Column 3 (Translation)
+        };
+        var bbox = new double[] { 153000, 463000, 154000, 464000, 0, 100 };
+        
+        // act - useEcefTransform=true means: use box bounding volume and full ECEF transform matrix
+        var json = TreeSerializer.ToImplicitTileset(fullTransform, bbox, 500, 2, crs: "", keepProjection: false, useEcefTransform: true);
+        
+        // assert
+        Assert.That(json != null, Is.True);
+        // When crs is empty, it should be null or empty in the asset
+        Assert.That(string.IsNullOrEmpty(json.asset.crs), Is.True);
+        // When useEcefTransform is true, we use boundingVolume box (like keepProjection)
+        Assert.That(json.root.boundingVolume.box, Is.Not.Null);
+        Assert.That(json.root.boundingVolume.region, Is.Null);
+
+        var box = json.root.boundingVolume.box;
+        Assert.That(box.Length, Is.EqualTo(12));
+        
+        // Transform should be the full matrix, not just translation
+        Assert.That(json.root.transform.Length, Is.EqualTo(16));
+        // Verify rotation components are preserved (not identity)
+        Assert.That(json.root.transform[0], Is.EqualTo(fullTransform[0]));
+        Assert.That(json.root.transform[1], Is.EqualTo(fullTransform[1]));
+        Assert.That(json.root.transform[4], Is.EqualTo(fullTransform[4]));
+        Assert.That(json.root.transform[5], Is.EqualTo(fullTransform[5]));
+        // Verify translation part
+        Assert.That(json.root.transform[12], Is.EqualTo(fullTransform[12]));
+        Assert.That(json.root.transform[13], Is.EqualTo(fullTransform[13]));
+        Assert.That(json.root.transform[14], Is.EqualTo(fullTransform[14]));
+    }
+
+    [Test]
     public void SerializeToImplicitTilingTest()
     {
         // arrange

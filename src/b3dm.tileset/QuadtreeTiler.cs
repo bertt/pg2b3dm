@@ -38,7 +38,7 @@ public class QuadtreeTiler
         this.stylingSettings = stylingSettings;
     }
 
-    public List<Tile> GenerateTiles(BoundingBox bbox, Tile tile, List<Tile> tiles, int lod = 0, bool createGltf = false, bool keepProjection = false)
+    public List<Tile> GenerateTiles(BoundingBox bbox, Tile tile, List<Tile> tiles, int lod = 0, bool createGltf = false, bool keepProjection = false, bool useEcefTransform = false)
     {
         var where = inputTable.GetQueryClause();
 
@@ -48,7 +48,8 @@ public class QuadtreeTiler
             where += $" and {lodquery}";
         }
 
-        var numberOfFeatures = FeatureCountRepository.CountFeaturesInBox(conn, inputTable.TableName, inputTable.GeometryColumn, new Point(bbox.XMin, bbox.YMin), new Point(bbox.XMax, bbox.YMax), where, source_epsg, keepProjection);
+        // When useEcefTransform is true, we use it like keepProjection for spatial queries
+        var numberOfFeatures = FeatureCountRepository.CountFeaturesInBox(conn, inputTable.TableName, inputTable.GeometryColumn, new Point(bbox.XMin, bbox.YMin), new Point(bbox.XMax, bbox.YMax), where, source_epsg, keepProjection || useEcefTransform);
 
         if (numberOfFeatures == 0) {
             tile.Available = false;
@@ -74,7 +75,7 @@ public class QuadtreeTiler
                     var bboxQuad = new BoundingBox(xstart, ystart, xend, yend);
                     var new_tile = new Tile(z, tile.X * 2 + x, tile.Y * 2 + y);
                     new_tile.BoundingBox = bboxQuad.ToArray();
-                    GenerateTiles(bboxQuad, new_tile, tiles, lod, createGltf, keepProjection);
+                    GenerateTiles(bboxQuad, new_tile, tiles, lod, createGltf, keepProjection, useEcefTransform);
                 }
             }
         }
@@ -92,13 +93,13 @@ public class QuadtreeTiler
 
             int target_srs = 4978;
 
-            if(keepProjection) {
+            if(keepProjection || useEcefTransform) {
                 target_srs = source_epsg;
             }
 
             byte[] bytes = null;
 
-            var geometries = GeometryRepository.GetGeometrySubset(conn, inputTable.TableName, inputTable.GeometryColumn, tile.BoundingBox, source_epsg, target_srs, inputTable.ShadersColumn, inputTable.AttributeColumns, where, inputTable.RadiusColumn, keepProjection);
+            var geometries = GeometryRepository.GetGeometrySubset(conn, inputTable.TableName, inputTable.GeometryColumn, tile.BoundingBox, source_epsg, target_srs, inputTable.ShadersColumn, inputTable.AttributeColumns, where, inputTable.RadiusColumn, keepProjection, useEcefTransform);
             // var scale = new double[] { 1, 1, 1 };
             if (geometries.Count > 0) {
 
@@ -117,13 +118,13 @@ public class QuadtreeTiler
                         // make a copy of the tile 
                         var t2 = new Tile(tile.Z, tile.X, tile.Y);
                         t2.BoundingBox = tile.BoundingBox;
-                        var lodNextTiles = GenerateTiles(bbox, t2, new List<Tile>(), nextLod, createGltf, keepProjection);
+                        var lodNextTiles = GenerateTiles(bbox, t2, new List<Tile>(), nextLod, createGltf, keepProjection, useEcefTransform);
                         tile.Children = lodNextTiles;
                     };
                 }
 
                 // next code is used to fix geometries that have centroid in the tile, but some parts outside...
-                var bbox_geometries = GeometryRepository.GetGeometriesBoundingBox(conn, inputTable.TableName, inputTable.GeometryColumn, source_epsg, tile, where, keepProjection);
+                var bbox_geometries = GeometryRepository.GetGeometriesBoundingBox(conn, inputTable.TableName, inputTable.GeometryColumn, source_epsg, tile, where, keepProjection || useEcefTransform);
                 var bbox_tile = new double[] { bbox_geometries[0], bbox_geometries[1], bbox_geometries[2], bbox_geometries[3] };
                 tile.BoundingBox = bbox_tile;
                 tile.ZMin = bbox_geometries[4];
