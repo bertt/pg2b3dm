@@ -94,6 +94,10 @@ class Program
             Console.WriteLine($"Spatial reference of {inputTable.TableName}.{inputTable.GeometryColumn}: {source_epsg}");
             inputTable.EPSGCode = source_epsg;
 
+            // Check if projection uses meters
+            var isProjectionInMeters = ProjectionUnitChecker.IsProjectionInMeters(conn, source_epsg);
+            Console.WriteLine($"Projection uses meters: {isProjectionInMeters}");
+
             // Check spatialIndex
             var hasSpatialIndex = SpatialIndexChecker.HasSpatialIndex(conn, inputTable.TableName, inputTable.GeometryColumn);
             if (!hasSpatialIndex) {
@@ -115,7 +119,7 @@ class Program
             Console.WriteLine($"Query bounding box of {inputTable.TableName}.{inputTable.GeometryColumn}...");
             var where = (inputTable.Query != string.Empty ? $" where {inputTable.Query}" : String.Empty);
 
-            var bbox_table = BoundingBoxRepository.GetBoundingBoxForTable(conn, inputTable.TableName, inputTable.GeometryColumn, keepProjection, where);
+            var bbox_table = BoundingBoxRepository.GetBoundingBoxForTable(conn, inputTable.TableName, inputTable.GeometryColumn, keepProjection || isProjectionInMeters, where);
             var bbox = bbox_table.bbox;
             var zmin = bbox_table.zmin;
             var zmax = bbox_table.zmax;
@@ -142,10 +146,15 @@ class Program
 
             Tiles3DExtensions.RegisterExtensions();
 
+            // Determine translation based on projection units and keepProjection flag
+            // If projection is in meters (and not keepProjection), use ECEF translation
+            // This allows geometries to stay in source CRS while properly positioning in 3D world
+            var useEcefTransform = !keepProjection && isProjectionInMeters;
             var translation = keepProjection ?
                 [(double)center.X, (double)center.Y, 0] :
                 Translation.ToEcef(center);
             Console.WriteLine($"Translation: {String.Join(',', translation)}");
+            Console.WriteLine($"Use ECEF transform in tileset: {useEcefTransform}");
 
             var lodcolumn = o.LodColumn;
             var addOutlines = (bool)o.AddOutlines;
@@ -184,7 +193,7 @@ class Program
             }
 
             var rootBoundingVolumeRegion =
-                keepProjection ?
+                keepProjection || useEcefTransform ?
                     bbox.ToRegion(zmin, zmax) :
                     bbox.ToRadians().ToRegion(zmin, zmax);
 
@@ -221,6 +230,7 @@ class Program
             tilingSettings.BoundingBox = bbox;
             tilingSettings.CreateGltf = createGltf;
             tilingSettings.KeepProjection = keepProjection;
+            tilingSettings.UseEcefTransform = useEcefTransform;
             tilingSettings.SkipCreateTiles = skipCreateTiles;
             tilingSettings.MaxFeaturesPerTile = maxFeaturesPerTile;
             tilingSettings.Lods = lods;
@@ -257,7 +267,7 @@ class Program
         tilesetSettings.SubtreeLevels = subtreeLevels;
 
         // todo add explicit tileset option
-        CesiumTiler.CreateImplicitTileset(tilesetSettings, tilingSettings.CreateGltf, tilingSettings.KeepProjection);
+        CesiumTiler.CreateImplicitTileset(tilesetSettings, tilingSettings.CreateGltf, tilingSettings.KeepProjection, tilingSettings.UseEcefTransform);
     }
 
     private static void QuadtreeTile(NpgsqlConnection conn, InputTable inputTable, StylingSettings stylingSettings, TilesetSettings tilesetSettings, TilingSettings tilingSettings)
@@ -268,7 +278,7 @@ class Program
         var outputSettings = tilesetSettings.OutputSettings;
 
         var quadtreeTiler = new QuadtreeTiler(conn, inputTable, stylingSettings, tilingSettings.MaxFeaturesPerTile, tilesetSettings.Translation, outputSettings.ContentFolder, tilingSettings.Lods, tilesetSettings.Copyright, tilingSettings.SkipCreateTiles);
-        var tiles = quadtreeTiler.GenerateTiles(bbox, tile, new List<Tile>(), inputTable.LodColumn != string.Empty ? tilingSettings.Lods.First() : 0, tilingSettings.CreateGltf, tilingSettings.KeepProjection);
+        var tiles = quadtreeTiler.GenerateTiles(bbox, tile, new List<Tile>(), inputTable.LodColumn != string.Empty ? tilingSettings.Lods.First() : 0, tilingSettings.CreateGltf, tilingSettings.KeepProjection, tilingSettings.UseEcefTransform);
         Console.WriteLine();
         Console.WriteLine("Tiles created: " + tiles.Count(tile => tile.Available));
 
@@ -276,7 +286,7 @@ class Program
             if (tilingSettings.UseImplicitTiling) {
                 var subtreeLevels = CesiumTiler.CreateSubtreeFiles(outputSettings, tiles);
                 tilesetSettings.SubtreeLevels = subtreeLevels;
-                CesiumTiler.CreateImplicitTileset(tilesetSettings, tilingSettings.CreateGltf, tilingSettings.KeepProjection);
+                CesiumTiler.CreateImplicitTileset(tilesetSettings, tilingSettings.CreateGltf, tilingSettings.KeepProjection, tilingSettings.UseEcefTransform);
             }
             else {
                 CesiumTiler.CreateExplicitTilesetsJson(tilesetSettings.Version, outputSettings.OutputFolder, tilesetSettings.Translation, 

@@ -9,7 +9,7 @@ namespace B3dm.Tileset;
 
 public static class TreeSerializer
 {
-    public static TileSet ToImplicitTileset(double[] translate, double[] box, double maxGeometricError, int subtreeLevels, Version version = null, bool createGltf = false, string tilesetVersion = "", string crs="", bool keepProjection = false, SubdivisionScheme subDivisionScheme = SubdivisionScheme.QUADTREE, RefinementType refinement = RefinementType.ADD)
+    public static TileSet ToImplicitTileset(double[] translate, double[] box, double maxGeometricError, int subtreeLevels, Version version = null, bool createGltf = false, string tilesetVersion = "", string crs="", bool keepProjection = false, SubdivisionScheme subDivisionScheme = SubdivisionScheme.QUADTREE, RefinementType refinement = RefinementType.ADD, bool useEcefTransform = false)
     {
         var isQuadtree = subDivisionScheme == SubdivisionScheme.QUADTREE;   
         var ext = createGltf ? ".glb" : ".b3dm";
@@ -19,7 +19,8 @@ public static class TreeSerializer
                                  0.0,1.0, 0.0, 0.0,
                                  0.0, 0.0, 1.0, 0.0,
         translate[0], translate[1], translate[2], 1.0};
-        var root = GetRoot(geometricError, t, box, refinement, keepProjection);
+        // When useEcefTransform is true, we use box bounding volumes like keepProjection
+        var root = GetRoot(geometricError, t, box, refinement, keepProjection || useEcefTransform);
         var fileName = isQuadtree? "{level}_{x}_{y}": "{level}_{z}_{x}_{y}";
         var content = new Content() { uri = "content/" + fileName + ext };
         root.content = content;

@@ -10,6 +10,8 @@ public class TilingSettings
 
     public bool KeepProjection { get; set; } = false;
 
+    public bool UseEcefTransform { get; set; } = false;
+
     public bool SkipCreateTiles { get; set; } = false;
 
     public int MaxFeaturesPerTile { get; set; } = 1000; 

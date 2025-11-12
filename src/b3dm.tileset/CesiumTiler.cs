@@ -39,9 +39,9 @@ public static class CesiumTiler
         return subtreeLevels;
     }
 
-    public static void CreateImplicitTileset(TilesetSettings tilesetSettings, bool createGltf, bool keepProjection)
+    public static void CreateImplicitTileset(TilesetSettings tilesetSettings, bool createGltf, bool keepProjection, bool useEcefTransform = false)
     {
-        var tilesetjson = TreeSerializer.ToImplicitTileset(tilesetSettings.Translation, tilesetSettings.RootBoundingVolumeRegion, tilesetSettings.GeometricError, tilesetSettings.SubtreeLevels, tilesetSettings.Version, createGltf, tilesetSettings.TilesetVersion, tilesetSettings.Crs, keepProjection, tilesetSettings.SubdivisionScheme, tilesetSettings.Refinement);
+        var tilesetjson = TreeSerializer.ToImplicitTileset(tilesetSettings.Translation, tilesetSettings.RootBoundingVolumeRegion, tilesetSettings.GeometricError, tilesetSettings.SubtreeLevels, tilesetSettings.Version, createGltf, tilesetSettings.TilesetVersion, tilesetSettings.Crs, keepProjection, tilesetSettings.SubdivisionScheme, tilesetSettings.Refinement, useEcefTransform);
         var file = $"{tilesetSettings.OutputSettings.OutputFolder}{Path.AltDirectorySeparatorChar}tileset.json";
         var json = JsonConvert.SerializeObject(tilesetjson, Formatting.Indented, new JsonSerializerSettings() { NullValueHandling = NullValueHandling.Ignore });
         Console.WriteLine($"Writing {file}...");
