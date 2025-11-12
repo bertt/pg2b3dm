@@ -146,27 +146,33 @@ class Program
 
             Tiles3DExtensions.RegisterExtensions();
 
-            // Determine translation based on projection units and keepProjection flag
-            // If projection is in meters (and not keepProjection), we need to transform center to WGS84 first
+            // Determine translation/transformation based on projection units and keepProjection flag
             var useEcefTransform = !keepProjection && isProjectionInMeters;
             
             double[] translation;
             if (keepProjection) {
-                // Local coordinates
+                // Local coordinates - simple translation
                 translation = [(double)center.X, (double)center.Y, 0];
             }
             else if (useEcefTransform) {
-                // For meter-based projections: transform center to WGS84, then to ECEF
+                // For meter-based projections: use full ENU to ECEF transformation matrix
+                // This includes rotation to align local coordinates with Earth's surface
                 var centerWgs84 = BoundingBoxRepository.GetCenterInWgs84(conn, inputTable.TableName, inputTable.GeometryColumn, source_epsg, where);
-                translation = Translation.ToEcef(centerWgs84);
+                translation = Translation.GetEnuToEcefTransform(centerWgs84);
                 Console.WriteLine($"Center in WGS84: {centerWgs84.X}, {centerWgs84.Y}");
+                Console.WriteLine($"Using full ENU to ECEF transformation matrix");
             }
             else {
-                // For degree-based projections: center is already in WGS84, convert to ECEF
+                // For degree-based projections: center is already in WGS84, simple ECEF translation
                 translation = Translation.ToEcef(center);
             }
             
-            Console.WriteLine($"Translation: {String.Join(',', translation)}");
+            if (translation.Length == 3) {
+                Console.WriteLine($"Translation: {String.Join(',', translation)}");
+            } else {
+                // For 16-element matrix, just show the translation part
+                Console.WriteLine($"Transform translation: {translation[12]}, {translation[13]}, {translation[14]}");
+            }
             Console.WriteLine($"Use ECEF transform in tileset: {useEcefTransform}");
 
             var lodcolumn = o.LodColumn;
