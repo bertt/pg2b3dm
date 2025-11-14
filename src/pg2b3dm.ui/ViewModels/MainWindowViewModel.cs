@@ -18,10 +18,10 @@ public partial class MainWindowViewModel : ViewModelBase
     private string _port = "5432";
 
     [ObservableProperty]
-    private string _database = Environment.UserName;
+    private string _database = "postgres";
 
     [ObservableProperty]
-    private string _username = Environment.UserName;
+    private string _username = "postgres";
 
     [ObservableProperty]
     private string _password = string.Empty;

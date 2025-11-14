@@ -10,9 +10,9 @@ public class BoolToRunTextConverter : IValueConverter
     {
         if (value is bool isRunning)
         {
-            return isRunning ? "Running..." : "Run pg2b3dm";
+            return isRunning ? "?? Processing..." : "? Run pg2b3dm";
         }
-        return "Run pg2b3dm";
+        return "? Run pg2b3dm";
     }
 
     public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
