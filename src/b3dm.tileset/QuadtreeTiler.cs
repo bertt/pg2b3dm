@@ -15,7 +15,7 @@ namespace pg2b3dm;
 public class QuadtreeTiler
 {
     private readonly NpgsqlConnection conn;
-    private readonly string fullConnectionString; // For creating connections in parallel threads
+    private readonly string connectionString; // Store for creating new connections in parallel threads
     private readonly int source_epsg;
     private readonly int maxFeaturesPerTile;
     private readonly double[] translation;
@@ -26,11 +26,10 @@ public class QuadtreeTiler
     private readonly StylingSettings stylingSettings;
     private InputTable inputTable;
 
-    public QuadtreeTiler(NpgsqlConnection conn, InputTable inputTable, StylingSettings stylingSettings, int maxFeaturesPerTile, double[] translation, string outputFolder, List<int> lods, string copyright = "", bool skipCreateTiles = false)
+    public QuadtreeTiler(string connectionString, InputTable inputTable, StylingSettings stylingSettings, int maxFeaturesPerTile, double[] translation, string outputFolder, List<int> lods, string copyright = "", bool skipCreateTiles = false)
     {
-        this.conn = conn;
-        // Use ConnectionString for parallel thread connections (password not included for security, will be handled by connection pooling)
-        this.fullConnectionString = conn.ConnectionString;
+        this.connectionString = connectionString;
+        this.conn = new NpgsqlConnection(connectionString);
         this.inputTable = inputTable;
         this.source_epsg = inputTable.EPSGCode;
         this.maxFeaturesPerTile = maxFeaturesPerTile;
@@ -88,9 +87,8 @@ public class QuadtreeTiler
                 var new_tile = new Tile(z, tile.X * 2 + x, tile.Y * 2 + y);
                 new_tile.BoundingBox = bboxQuad.ToArray();
                 
-                // Each thread creates its own connection from the stored connection string
-                using var threadConn = new NpgsqlConnection(fullConnectionString);
-                var tiler = new QuadtreeTiler(threadConn, inputTable, stylingSettings, maxFeaturesPerTile, translation, outputFolder, lods, copyright, skipCreateTiles);
+                // Each thread creates its own tiler with a new connection
+                var tiler = new QuadtreeTiler(connectionString, inputTable, stylingSettings, maxFeaturesPerTile, translation, outputFolder, lods, copyright, skipCreateTiles);
                 var subtiles = new List<Tile>();
                 tiler.GenerateTiles(bboxQuad, new_tile, subtiles, lod, createGltf, keepProjection);
                 

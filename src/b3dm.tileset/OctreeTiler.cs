@@ -13,17 +13,16 @@ namespace B3dm.Tileset;
 public class OctreeTiler
 {
     private readonly NpgsqlConnection conn;
-    private readonly string fullConnectionString; // For creating connections in parallel threads
+    private readonly string connectionString; // Store for creating new connections in parallel threads
     private readonly TilingSettings tilingSettings;
     private readonly StylingSettings stylingSettings;
     private readonly TilesetSettings tilesetSettings;
     private readonly InputTable inputTable;
 
-    public OctreeTiler(NpgsqlConnection conn, InputTable inputTable, TilingSettings tilingSetttings, StylingSettings stylingSettings, TilesetSettings tilesetSettings)
+    public OctreeTiler(string connectionString, InputTable inputTable, TilingSettings tilingSetttings, StylingSettings stylingSettings, TilesetSettings tilesetSettings)
     {
-        this.conn = conn;
-        // Use ConnectionString for parallel thread connections (password not included for security, will be handled by connection pooling)
-        this.fullConnectionString = conn.ConnectionString;
+        this.connectionString = connectionString;
+        this.conn = new NpgsqlConnection(connectionString);
         this.inputTable = inputTable;
         this.tilingSettings = tilingSetttings;
         this.stylingSettings = stylingSettings;
@@ -82,9 +81,8 @@ public class OctreeTiler
                 var bbox3d = new BoundingBox3D(xstart, ystart, z_start, xend, yend, zend);
                 var new_tile = new Tile3D(level, tile.X * 2 + x, tile.Y * 2 + y, tile.Z * 2 + z);
                 
-                // Each thread creates its own connection from the stored connection string
-                using var threadConn = new NpgsqlConnection(fullConnectionString);
-                var tiler = new OctreeTiler(threadConn, inputTable, tilingSettings, stylingSettings, tilesetSettings);
+                // Each thread creates its own tiler with a new connection
+                var tiler = new OctreeTiler(connectionString, inputTable, tilingSettings, stylingSettings, tilesetSettings);
                 var subtiles = new List<Tile3D>();
                 var subtileBounds = tileBounds != null ? new Dictionary<string, BoundingBox3D>() : null;
                 tiler.GenerateTiles3D(bbox3d, level, new_tile, subtiles, subtileBounds);
@@ -116,7 +114,6 @@ public class OctreeTiler
             }
 
             var bbox1 = new double[] { bbox.XMin, bbox.YMin, bbox.XMax, bbox.YMax, bbox.ZMin, bbox.ZMax };
-            
             var geometries = GeometryRepository.GetGeometrySubset(conn, inputTable.TableName, inputTable.GeometryColumn, bbox1, inputTable.EPSGCode, target_srs, inputTable.ShadersColumn, inputTable.AttributeColumns, where, inputTable.RadiusColumn, tilingSettings.KeepProjection);
 
             if (geometries.Count > 0) {
