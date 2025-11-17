@@ -75,7 +75,7 @@ public class UnitTest1
             Translation = trans
         };
 
-        var implicitTiler = new OctreeTiler(conn, inputTable, tilingSettings, stylingSettings, tilesetSettings, connectionString);
+        var implicitTiler = new OctreeTiler(connectionString, inputTable, tilingSettings, stylingSettings, tilesetSettings);
         var tiles = implicitTiler.GenerateTiles3D(boundingBox3D, 0, new Tile3D(0, 0, 0, 0 ), new List<Tile3D>());
 
         Assert.That(tiles.Count, Is.EqualTo(36));
@@ -117,7 +117,7 @@ public class UnitTest1
             Translation = trans
         };
 
-        var implicitTiler = new OctreeTiler(conn, inputTable, tilingSettings, stylingSettings, tilesetSettings, connectionString);
+        var implicitTiler = new OctreeTiler(connectionString, inputTable, tilingSettings, stylingSettings, tilesetSettings);
         var tiles = implicitTiler.GenerateTiles3D(boundingBox3D, 0, new Tile3D(0, 0, 0, 0), new List<Tile3D>());
 
         Assert.That(tiles.Count, Is.EqualTo(36));
@@ -165,12 +165,11 @@ public class UnitTest1
         var stylingSettings = new StylingSettings();
 
         var implicitTiler = new 
-            QuadtreeTiler(conn, inputTable, stylingSettings, 50,
+            QuadtreeTiler(connectionString, inputTable, stylingSettings, 50,
             trans,
             "output/content",
             new List<int>() { 0 },
-            skipCreateTiles: true,
-            connectionString: connectionString);
+            skipCreateTiles: true);
         var tiles = implicitTiler.GenerateTiles(
         bbox_wgs84.bbox,
         new Tile(0, 0, 0),
@@ -198,13 +197,12 @@ public class UnitTest1
             EPSGCode = 4326
         };
         var stylingSettings = new StylingSettings();
-        var implicitTiler = new QuadtreeTiler(conn, 
+        var implicitTiler = new QuadtreeTiler(connectionString, 
             inputTable, stylingSettings, 10,
             trans,
             "output/content",
             new List<int>() { 0, 1 },
-            skipCreateTiles: true,
-            connectionString: connectionString);
+            skipCreateTiles: true);
         var tiles = implicitTiler.GenerateTiles(
         bbox_wgs84.bbox,
         new Tile(0, 0, 0),
@@ -230,12 +228,11 @@ public class UnitTest1
             EPSGCode = 4326
         };
         var stylingSettings = new StylingSettings();
-        var implicitTiler = new QuadtreeTiler(conn, inputTable, stylingSettings, 50,
+        var implicitTiler = new QuadtreeTiler(connectionString, inputTable, stylingSettings, 50,
             trans,
             "output/content",
             new List<int>() { 0 },
-            skipCreateTiles: false,
-            connectionString: connectionString);
+            skipCreateTiles: false);
         var tile = new Tile(0, 0, 0) {
             BoundingBox = bbox_wgs84.bbox.ToArray()
         };

@@ -14,8 +14,7 @@ namespace pg2b3dm;
 
 public class QuadtreeTiler
 {
-    private readonly NpgsqlConnection conn;
-    private readonly string connectionStringWithPassword; // Store full connection string with password
+    private readonly string connectionString;
     private readonly int source_epsg;
     private readonly int maxFeaturesPerTile;
     private readonly double[] translation;
@@ -26,10 +25,9 @@ public class QuadtreeTiler
     private readonly StylingSettings stylingSettings;
     private InputTable inputTable;
 
-    public QuadtreeTiler(NpgsqlConnection conn, InputTable inputTable, StylingSettings stylingSettings, int maxFeaturesPerTile, double[] translation, string outputFolder, List<int> lods, string copyright = "", bool skipCreateTiles = false, string connectionString = null)
+    public QuadtreeTiler(string connectionString, InputTable inputTable, StylingSettings stylingSettings, int maxFeaturesPerTile, double[] translation, string outputFolder, List<int> lods, string copyright = "", bool skipCreateTiles = false)
     {
-        this.conn = conn;
-        this.connectionStringWithPassword = connectionString ?? conn.ConnectionString;
+        this.connectionString = connectionString;
         this.inputTable = inputTable;
         this.source_epsg = inputTable.EPSGCode;
         this.maxFeaturesPerTile = maxFeaturesPerTile;
@@ -51,6 +49,7 @@ public class QuadtreeTiler
             where += $" and {lodquery}";
         }
 
+        using var conn = new NpgsqlConnection(connectionString);
         var numberOfFeatures = FeatureCountRepository.CountFeaturesInBox(conn, inputTable.TableName, inputTable.GeometryColumn, new Point(bbox.XMin, bbox.YMin), new Point(bbox.XMax, bbox.YMax), where, source_epsg, keepProjection);
 
         if (numberOfFeatures == 0) {
@@ -87,17 +86,15 @@ public class QuadtreeTiler
                 var new_tile = new Tile(z, tile.X * 2 + x, tile.Y * 2 + y);
                 new_tile.BoundingBox = bboxQuad.ToArray();
                 
-                // Each thread needs its own connection
-                using (var threadConn = new NpgsqlConnection(connectionStringWithPassword)) {
-                    var tiler = new QuadtreeTiler(threadConn, inputTable, stylingSettings, maxFeaturesPerTile, translation, outputFolder, lods, copyright, skipCreateTiles, connectionStringWithPassword);
-                    var subtiles = new List<Tile>();
-                    tiler.GenerateTiles(bboxQuad, new_tile, subtiles, lod, createGltf, keepProjection);
-                    
-                    // Thread-safe addition to tiles list
-                    lock (tilesLock) {
-                        foreach (var subtile in subtiles) {
-                            tiles.Add(subtile);
-                        }
+                // Each thread creates its own tiler with the connection string
+                var tiler = new QuadtreeTiler(connectionString, inputTable, stylingSettings, maxFeaturesPerTile, translation, outputFolder, lods, copyright, skipCreateTiles);
+                var subtiles = new List<Tile>();
+                tiler.GenerateTiles(bboxQuad, new_tile, subtiles, lod, createGltf, keepProjection);
+                
+                // Thread-safe addition to tiles list
+                lock (tilesLock) {
+                    foreach (var subtile in subtiles) {
+                        tiles.Add(subtile);
                     }
                 }
             });
