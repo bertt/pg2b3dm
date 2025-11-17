@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using B3dm.Tileset;
 using B3dm.Tileset.Extensions;
 using B3dm.Tileset.settings;
@@ -14,6 +15,7 @@ namespace pg2b3dm;
 public class QuadtreeTiler
 {
     private readonly NpgsqlConnection conn;
+    private readonly string connectionStringWithPassword; // Store full connection string with password
     private readonly int source_epsg;
     private readonly int maxFeaturesPerTile;
     private readonly double[] translation;
@@ -24,9 +26,10 @@ public class QuadtreeTiler
     private readonly StylingSettings stylingSettings;
     private InputTable inputTable;
 
-    public QuadtreeTiler(NpgsqlConnection conn, InputTable inputTable, StylingSettings stylingSettings, int maxFeaturesPerTile, double[] translation, string outputFolder, List<int> lods, string copyright = "", bool skipCreateTiles = false)
+    public QuadtreeTiler(NpgsqlConnection conn, InputTable inputTable, StylingSettings stylingSettings, int maxFeaturesPerTile, double[] translation, string outputFolder, List<int> lods, string copyright = "", bool skipCreateTiles = false, string connectionString = null)
     {
         this.conn = conn;
+        this.connectionStringWithPassword = connectionString ?? conn.ConnectionString;
         this.inputTable = inputTable;
         this.source_epsg = inputTable.EPSGCode;
         this.maxFeaturesPerTile = maxFeaturesPerTile;
@@ -60,23 +63,44 @@ public class QuadtreeTiler
 
             var z = tile.Z + 1;
 
-            // split in quadtree
+            // Create list of quadrants to process
+            var quadrants = new List<(int x, int y)>();
             for (var x = 0; x < 2; x++) {
                 for (var y = 0; y < 2; y++) {
-                    var dx = (bbox.XMax - bbox.XMin) / 2;
-                    var dy = (bbox.YMax - bbox.YMin) / 2;
-
-                    var xstart = bbox.XMin + dx * x;
-                    var ystart = bbox.YMin + dy * y;
-                    var xend = xstart + dx;
-                    var yend = ystart + dy;
-
-                    var bboxQuad = new BoundingBox(xstart, ystart, xend, yend);
-                    var new_tile = new Tile(z, tile.X * 2 + x, tile.Y * 2 + y);
-                    new_tile.BoundingBox = bboxQuad.ToArray();
-                    GenerateTiles(bboxQuad, new_tile, tiles, lod, createGltf, keepProjection);
+                    quadrants.Add((x, y));
                 }
             }
+
+            // Process quadrants in parallel
+            var tilesLock = new object();
+            Parallel.ForEach(quadrants, quadrant => {
+                var (x, y) = quadrant;
+                var dx = (bbox.XMax - bbox.XMin) / 2;
+                var dy = (bbox.YMax - bbox.YMin) / 2;
+
+                var xstart = bbox.XMin + dx * x;
+                var ystart = bbox.YMin + dy * y;
+                var xend = xstart + dx;
+                var yend = ystart + dy;
+
+                var bboxQuad = new BoundingBox(xstart, ystart, xend, yend);
+                var new_tile = new Tile(z, tile.X * 2 + x, tile.Y * 2 + y);
+                new_tile.BoundingBox = bboxQuad.ToArray();
+                
+                // Each thread needs its own connection
+                using (var threadConn = new NpgsqlConnection(connectionStringWithPassword)) {
+                    var tiler = new QuadtreeTiler(threadConn, inputTable, stylingSettings, maxFeaturesPerTile, translation, outputFolder, lods, copyright, skipCreateTiles, connectionStringWithPassword);
+                    var subtiles = new List<Tile>();
+                    tiler.GenerateTiles(bboxQuad, new_tile, subtiles, lod, createGltf, keepProjection);
+                    
+                    // Thread-safe addition to tiles list
+                    lock (tilesLock) {
+                        foreach (var subtile in subtiles) {
+                            tiles.Add(subtile);
+                        }
+                    }
+                }
+            });
         }
         else {
 

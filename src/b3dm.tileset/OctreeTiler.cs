@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading.Tasks;
 using B3dm.Tileset.settings;
 using Npgsql;
 using pg2b3dm;
@@ -12,14 +13,16 @@ namespace B3dm.Tileset;
 public class OctreeTiler
 {
     private readonly NpgsqlConnection conn;
+    private readonly string connectionStringWithPassword; // Store full connection string with password
     private readonly TilingSettings tilingSettings;
     private readonly StylingSettings stylingSettings;
     private readonly TilesetSettings tilesetSettings;
     private readonly InputTable inputTable;
 
-    public OctreeTiler(NpgsqlConnection conn, InputTable inputTable, TilingSettings tilingSetttings, StylingSettings stylingSettings, TilesetSettings tilesetSettings)
+    public OctreeTiler(NpgsqlConnection conn, InputTable inputTable, TilingSettings tilingSetttings, StylingSettings stylingSettings, TilesetSettings tilesetSettings, string connectionString = null)
     {
         this.conn = conn;
+        this.connectionStringWithPassword = connectionString ?? conn.ConnectionString;
         this.inputTable = inputTable;
         this.tilingSettings = tilingSetttings;
         this.stylingSettings = stylingSettings;
@@ -47,28 +50,61 @@ public class OctreeTiler
         }
         else if (numberOfFeatures > tilingSettings.MaxFeaturesPerTile) {
             level++;
+            
+            // Create list of octants to process
+            var octants = new List<(int x, int y, int z)>();
             for (var x = 0; x < 2; x++) {
                 for (var y = 0; y < 2; y++) {
-                    var dx = (bbox.XMax - bbox.XMin) / 2;
-                    var dy = (bbox.YMax - bbox.YMin) / 2;
-
-                    var xstart = bbox.XMin + dx * x;
-                    var ystart = bbox.YMin + dy * y;
-                    var xend = xstart + dx;
-                    var yend = ystart + dy;
-
-
                     for (var z = 0; z < 2; z++) {
-                        var dz = (bbox.ZMax - bbox.ZMin) / 2;
-                        var z_start = bbox.ZMin + dz * z;
-                        var zend = z_start + dz;
-                        var bbox3d = new BoundingBox3D(xstart, ystart, z_start, xend, yend, zend);
-
-                        var new_tile = new Tile3D(level, tile.X * 2 + x, tile.Y * 2 + y, tile.Z * 2 + z);
-                        GenerateTiles3D(bbox3d, level, new_tile, tiles, tileBounds);
+                        octants.Add((x, y, z));
                     }
                 }
             }
+
+            // Process octants in parallel
+            var tilesLock = new object();
+            var boundsLock = new object();
+            
+            Parallel.ForEach(octants, octant => {
+                var (x, y, z) = octant;
+                var dx = (bbox.XMax - bbox.XMin) / 2;
+                var dy = (bbox.YMax - bbox.YMin) / 2;
+                var dz = (bbox.ZMax - bbox.ZMin) / 2;
+
+                var xstart = bbox.XMin + dx * x;
+                var ystart = bbox.YMin + dy * y;
+                var z_start = bbox.ZMin + dz * z;
+                var xend = xstart + dx;
+                var yend = ystart + dy;
+                var zend = z_start + dz;
+                
+                var bbox3d = new BoundingBox3D(xstart, ystart, z_start, xend, yend, zend);
+                var new_tile = new Tile3D(level, tile.X * 2 + x, tile.Y * 2 + y, tile.Z * 2 + z);
+                
+                // Each thread needs its own connection
+                using (var threadConn = new NpgsqlConnection(connectionStringWithPassword)) {
+                    var tiler = new OctreeTiler(threadConn, inputTable, tilingSettings, stylingSettings, tilesetSettings, connectionStringWithPassword);
+                    var subtiles = new List<Tile3D>();
+                    var subtileBounds = tileBounds != null ? new Dictionary<string, BoundingBox3D>() : null;
+                    tiler.GenerateTiles3D(bbox3d, level, new_tile, subtiles, subtileBounds);
+                    
+                    // Thread-safe addition to tiles list
+                    lock (tilesLock) {
+                        foreach (var subtile in subtiles) {
+                            tiles.Add(subtile);
+                        }
+                    }
+                    
+                    // Thread-safe addition to bounds dictionary
+                    if (subtileBounds != null && tileBounds != null) {
+                        lock (boundsLock) {
+                            foreach (var kvp in subtileBounds) {
+                                tileBounds[kvp.Key] = kvp.Value;
+                            }
+                        }
+                    }
+                }
+            });
         }
         else {
             var boundingBox = new BoundingBox(bbox.XMin, bbox.YMin, bbox.XMax, bbox.YMax);

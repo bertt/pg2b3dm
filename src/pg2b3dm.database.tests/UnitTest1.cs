@@ -75,7 +75,7 @@ public class UnitTest1
             Translation = trans
         };
 
-        var implicitTiler = new OctreeTiler(conn, inputTable, tilingSettings, stylingSettings, tilesetSettings);
+        var implicitTiler = new OctreeTiler(conn, inputTable, tilingSettings, stylingSettings, tilesetSettings, connectionString);
         var tiles = implicitTiler.GenerateTiles3D(boundingBox3D, 0, new Tile3D(0, 0, 0, 0 ), new List<Tile3D>());
 
         Assert.That(tiles.Count, Is.EqualTo(36));
@@ -117,7 +117,7 @@ public class UnitTest1
             Translation = trans
         };
 
-        var implicitTiler = new OctreeTiler(conn, inputTable, tilingSettings, stylingSettings, tilesetSettings);
+        var implicitTiler = new OctreeTiler(conn, inputTable, tilingSettings, stylingSettings, tilesetSettings, connectionString);
         var tiles = implicitTiler.GenerateTiles3D(boundingBox3D, 0, new Tile3D(0, 0, 0, 0), new List<Tile3D>());
 
         Assert.That(tiles.Count, Is.EqualTo(36));
@@ -169,7 +169,8 @@ public class UnitTest1
             trans,
             "output/content",
             new List<int>() { 0 },
-            skipCreateTiles: true);
+            skipCreateTiles: true,
+            connectionString: connectionString);
         var tiles = implicitTiler.GenerateTiles(
         bbox_wgs84.bbox,
         new Tile(0, 0, 0),
@@ -202,7 +203,8 @@ public class UnitTest1
             trans,
             "output/content",
             new List<int>() { 0, 1 },
-            skipCreateTiles: true);
+            skipCreateTiles: true,
+            connectionString: connectionString);
         var tiles = implicitTiler.GenerateTiles(
         bbox_wgs84.bbox,
         new Tile(0, 0, 0),
@@ -232,7 +234,8 @@ public class UnitTest1
             trans,
             "output/content",
             new List<int>() { 0 },
-            skipCreateTiles: false);
+            skipCreateTiles: false,
+            connectionString: connectionString);
         var tile = new Tile(0, 0, 0) {
             BoundingBox = bbox_wgs84.bbox.ToArray()
         };

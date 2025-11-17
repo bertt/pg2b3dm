@@ -223,11 +223,11 @@ class Program
             tilingSettings.Lods = lods;
 
             if (subdivisionScheme == SubdivisionScheme.QUADTREE) {
-                QuadtreeTile(conn, inputTable, stylingSettings, tilesetSettings, tilingSettings);
+                QuadtreeTile(conn, connectionString, inputTable, stylingSettings, tilesetSettings, tilingSettings);
             }
             else {
                 var boundingBox3D = new BoundingBox3D() { XMin = bbox.XMin, YMin = bbox.YMin, ZMin = zmin, XMax = bbox.XMax, YMax = bbox.YMax, ZMax = zmax };
-                OctreeTile(conn, boundingBox3D, inputTable, stylingSettings, tilesetSettings, tilingSettings);
+                OctreeTile(conn, connectionString, boundingBox3D, inputTable, stylingSettings, tilesetSettings, tilingSettings);
             }
 
             Console.WriteLine();
@@ -240,11 +240,11 @@ class Program
         });
     }
 
-    private static void OctreeTile(NpgsqlConnection conn, BoundingBox3D bbox3D, InputTable inputTable, StylingSettings stylingSettings, TilesetSettings tilesetSettings, TilingSettings tilingSettings)
+    private static void OctreeTile(NpgsqlConnection conn, string connectionString, BoundingBox3D bbox3D, InputTable inputTable, StylingSettings stylingSettings, TilesetSettings tilesetSettings, TilingSettings tilingSettings)
     {
         var rootTile3D = new Tile3D(0, 0, 0, 0);
 
-        var octreeTiler = new OctreeTiler(conn, inputTable, tilingSettings, stylingSettings, tilesetSettings);
+        var octreeTiler = new OctreeTiler(conn, inputTable, tilingSettings, stylingSettings, tilesetSettings, connectionString);
         
         var tileBounds = new Dictionary<string, BoundingBox3D>();
         var tiles3D = octreeTiler.GenerateTiles3D(bbox3D, 0, rootTile3D, new List<Tile3D>(), tileBounds);
@@ -269,14 +269,14 @@ class Program
         }
     }
 
-    private static void QuadtreeTile(NpgsqlConnection conn, InputTable inputTable, StylingSettings stylingSettings, TilesetSettings tilesetSettings, TilingSettings tilingSettings)
+    private static void QuadtreeTile(NpgsqlConnection conn, string connectionString, InputTable inputTable, StylingSettings stylingSettings, TilesetSettings tilesetSettings, TilingSettings tilingSettings)
     {
         var tile = new Tile(0, 0, 0);
         var bbox = tilingSettings.BoundingBox;
         tile.BoundingBox = bbox.ToArray();
         var outputSettings = tilesetSettings.OutputSettings;
 
-        var quadtreeTiler = new QuadtreeTiler(conn, inputTable, stylingSettings, tilingSettings.MaxFeaturesPerTile, tilesetSettings.Translation, outputSettings.ContentFolder, tilingSettings.Lods, tilesetSettings.Copyright, tilingSettings.SkipCreateTiles);
+        var quadtreeTiler = new QuadtreeTiler(conn, inputTable, stylingSettings, tilingSettings.MaxFeaturesPerTile, tilesetSettings.Translation, outputSettings.ContentFolder, tilingSettings.Lods, tilesetSettings.Copyright, tilingSettings.SkipCreateTiles, connectionString);
         var tiles = quadtreeTiler.GenerateTiles(bbox, tile, new List<Tile>(), inputTable.LodColumn != string.Empty ? tilingSettings.Lods.First() : 0, tilingSettings.CreateGltf, tilingSettings.KeepProjection);
         Console.WriteLine();
         Console.WriteLine("Tiles created: " + tiles.Count(tile => tile.Available));
