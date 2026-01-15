@@ -26,7 +26,14 @@ public static class FeatureCountRepository
         var where = GeometryRepository.GetWhere(geometry_column, from, to, query, source_epsg, keepProjection);
         
         // Calculate max of width and height for each feature, then get the maximum value
-        var select = $"SELECT COALESCE(MAX(GREATEST(ST_XMax(ST_Envelope({geometry_column})) - ST_XMin(ST_Envelope({geometry_column})), ST_YMax(ST_Envelope({geometry_column})) - ST_YMin(ST_Envelope({geometry_column})))), 0)";
+        // Width = ST_XMax(envelope) - ST_XMin(envelope)
+        // Height = ST_YMax(envelope) - ST_YMin(envelope)
+        // Size = GREATEST(width, height)
+        var envelope = $"ST_Envelope({geometry_column})";
+        var width = $"ST_XMax({envelope}) - ST_XMin({envelope})";
+        var height = $"ST_YMax({envelope}) - ST_YMin({envelope})";
+        var objectSize = $"GREATEST({width}, {height})";
+        var select = $"SELECT COALESCE(MAX({objectSize}), 0)";
         var sql = $"{select} FROM {geometry_table} WHERE {where}";
         
         conn.Open();
