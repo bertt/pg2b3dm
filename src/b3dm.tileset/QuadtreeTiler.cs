@@ -61,10 +61,10 @@ public class QuadtreeTiler
             if (numberOfFeatures > maxFeaturesPerTile) {
                 shouldSplit = true;
             }
-            // New logic: also consider object size, but only when there are multiple features
-            // and only at shallow zoom levels. This prevents very large objects mixed with
-            // small objects from all being rendered at the same z-level.
-            else if (numberOfFeatures > 1 && tile.Z < 10) {  // Only apply size-based splitting when multiple features exist
+            // New logic: also consider object size, but only when there are multiple features.
+            // This prevents very large objects mixed with small objects from all being 
+            // rendered at the same z-level.
+            else if (numberOfFeatures > 1) {  // Only apply size-based splitting when multiple features exist
                 var maxObjectSize = FeatureCountRepository.GetMaxObjectSizeInBox(conn, inputTable.TableName, inputTable.GeometryColumn, new Point(bbox.XMin, bbox.YMin), new Point(bbox.XMax, bbox.YMax), where, source_epsg, keepProjection);
                 var tileSize = Math.Max(bbox.XMax - bbox.XMin, bbox.YMax - bbox.YMin);
                 
