@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -7,6 +7,7 @@ using B3dm.Tileset.Extensions;
 using B3dm.Tileset.settings;
 using Npgsql;
 using subtree;
+using Wkb2Gltf;
 using Wkx;
 
 namespace pg2b3dm;
@@ -22,9 +23,12 @@ public class QuadtreeTiler
     private readonly string copyright;
     private readonly bool skipCreateTiles;
     private readonly StylingSettings stylingSettings;
+    private readonly double minFeatureSizeRatio;
+    private readonly bool useSizeBasedTiling;
+    private double rootTileDiagonal;
     private InputTable inputTable;
 
-    public QuadtreeTiler(string connectionString, InputTable inputTable, StylingSettings stylingSettings, int maxFeaturesPerTile, double[] translation, string outputFolder, List<int> lods, string copyright = "", bool skipCreateTiles = false)
+    public QuadtreeTiler(string connectionString, InputTable inputTable, StylingSettings stylingSettings, int maxFeaturesPerTile, double[] translation, string outputFolder, List<int> lods, string copyright = "", bool skipCreateTiles = false, double minFeatureSizeRatio = 0.0)
     {
         this.conn = new NpgsqlConnection(connectionString);
         this.inputTable = inputTable;
@@ -36,10 +40,18 @@ public class QuadtreeTiler
         this.copyright = copyright;
         this.skipCreateTiles = skipCreateTiles;
         this.stylingSettings = stylingSettings;
+        this.minFeatureSizeRatio = minFeatureSizeRatio;
+        // If minFeatureSizeRatio > 0, use size-based tiling (tippecanoe-style)
+        this.useSizeBasedTiling = minFeatureSizeRatio > 0;
     }
 
     public List<Tile> GenerateTiles(BoundingBox bbox, Tile tile, List<Tile> tiles, int lod = 0, bool createGltf = false, bool keepProjection = false)
     {
+        // Calculate root tile diagonal on first call (when tile.Z == 0)
+        if (tile.Z == 0) {
+            rootTileDiagonal = ZoomLevelCalculator.CalculateDiagonal(bbox.XMin, bbox.YMin, bbox.XMax, bbox.YMax);
+        }
+
         var where = inputTable.GetQueryClause();
 
         var lodquery = LodQuery.GetLodQuery(inputTable.LodColumn, lod);
@@ -53,8 +65,19 @@ public class QuadtreeTiler
         if (numberOfFeatures == 0) {
             tile.Available = false;
             tiles.Add(tile);
+            return tiles;
         }
-        else if (numberOfFeatures > maxFeaturesPerTile) {
+
+        // Determine if we should split this tile
+        bool shouldSplit;
+        if (useSizeBasedTiling) {
+            shouldSplit = ShouldSplitBasedOnSize(bbox, where, keepProjection, numberOfFeatures);
+        }
+        else {
+            shouldSplit = numberOfFeatures > maxFeaturesPerTile;
+        }
+
+        if (shouldSplit) {
             tile.Available = false;
             tiles.Add(tile);
 
@@ -79,66 +102,157 @@ public class QuadtreeTiler
             }
         }
         else {
-
-            var file = $"{tile.Z}_{tile.X}_{tile.Y}";
-            if (inputTable.LodColumn != String.Empty) {
-                file += $"_{lod}";
-            }
-
-            var ext = createGltf ? ".glb" : ".b3dm";
-            file += ext;
-            Console.Write($"\rCreating tile: {file}  ");
-            tile.ContentUri = file;
-
-            int target_srs = 4978;
-
-            if(keepProjection) {
-                target_srs = source_epsg;
-            }
-
-            byte[] bytes = null;
-
-            var geometries = GeometryRepository.GetGeometrySubset(conn, inputTable.TableName, inputTable.GeometryColumn, tile.BoundingBox, source_epsg, target_srs, inputTable.ShadersColumn, inputTable.AttributeColumns, where, inputTable.RadiusColumn, keepProjection);
-            // var scale = new double[] { 1, 1, 1 };
-            if (geometries.Count > 0) {
-
-                tile.Lod = lod;
-
-                if (!skipCreateTiles) {
-                    bytes = TileWriter.ToTile(geometries, translation, copyright: copyright, addOutlines: stylingSettings.AddOutlines, defaultColor: stylingSettings.DefaultColor, defaultMetallicRoughness: stylingSettings.DefaultMetallicRoughness, doubleSided: stylingSettings.DoubleSided, defaultAlphaMode: stylingSettings.DefaultAlphaMode, alphaCutoff: stylingSettings.AlphaCutoff, createGltf: createGltf);
-                    File.WriteAllBytes($"{outputFolder}{Path.AltDirectorySeparatorChar}{file}", bytes);
-                }
-                if (inputTable.LodColumn != String.Empty) {
-                    if (lod < lods.Max()) {
-                        // take the next lod
-                        var currentIndex = lods.FindIndex(p => p == lod);
-                        var nextIndex = currentIndex + 1;
-                        var nextLod = lods[nextIndex];
-                        // make a copy of the tile 
-                        var t2 = new Tile(tile.Z, tile.X, tile.Y);
-                        t2.BoundingBox = tile.BoundingBox;
-                        var lodNextTiles = GenerateTiles(bbox, t2, new List<Tile>(), nextLod, createGltf, keepProjection);
-                        tile.Children = lodNextTiles;
-                    };
-                }
-
-                // next code is used to fix geometries that have centroid in the tile, but some parts outside...
-                var bbox_geometries = GeometryRepository.GetGeometriesBoundingBox(conn, inputTable.TableName, inputTable.GeometryColumn, source_epsg, tile, where, keepProjection);
-                var bbox_tile = new double[] { bbox_geometries[0], bbox_geometries[1], bbox_geometries[2], bbox_geometries[3] };
-                tile.BoundingBox = bbox_tile;
-                tile.ZMin = bbox_geometries[4];
-                tile.ZMax = bbox_geometries[5];
-
-                tile.Available = true;
-
-                if (skipCreateTiles) { tile.Available = true; }
-            }
-            else {
-                tile.Available = false;
-            }
-            tiles.Add(tile);
+            CreateTileContent(bbox, tile, tiles, lod, createGltf, keepProjection, where);
         }
 
         return tiles;
+    }
+
+    /// <summary>
+    /// Determines if a tile should be split based on feature sizes (tippecanoe-style).
+    /// A tile should split if there are small features that would be better represented at higher zoom levels.
+    /// </summary>
+    private bool ShouldSplitBasedOnSize(BoundingBox bbox, string where, bool keepProjection, int numberOfFeatures)
+    {
+        // Calculate the diagonal of the current tile
+        var tileDiagonal = ZoomLevelCalculator.CalculateDiagonal(bbox.XMin, bbox.YMin, bbox.XMax, bbox.YMax);
+        
+        // Get feature size statistics
+        var stats = FeatureSizeRepository.GetFeatureSizeStats(
+            conn, 
+            inputTable.TableName, 
+            inputTable.GeometryColumn, 
+            new Point(bbox.XMin, bbox.YMin), 
+            new Point(bbox.XMax, bbox.YMax), 
+            where, 
+            source_epsg, 
+            keepProjection, 
+            tileDiagonal, 
+            minFeatureSizeRatio);
+
+        // Split if there are features that are too small for this zoom level
+        // Also consider maxFeaturesPerTile as a fallback to prevent infinite splitting
+        // when there are many very small features
+        if (stats.SmallFeaturesCount > 0) {
+            // Check if we have reached a reasonable tile size or max features threshold
+            // to prevent infinite recursion with many tiny features
+            if (numberOfFeatures <= maxFeaturesPerTile && stats.LargeFeaturesCount > 0) {
+                // We have both large and small features - create tile with large features
+                // Small features will appear in child tiles
+                return false;
+            }
+            return true;
+        }
+
+        // All features are large enough for this zoom level
+        return false;
+    }
+
+    private void CreateTileContent(BoundingBox bbox, Tile tile, List<Tile> tiles, int lod, bool createGltf, bool keepProjection, string where)
+    {
+        var file = $"{tile.Z}_{tile.X}_{tile.Y}";
+        if (inputTable.LodColumn != String.Empty) {
+            file += $"_{lod}";
+        }
+
+        var ext = createGltf ? ".glb" : ".b3dm";
+        file += ext;
+        Console.Write($"\rCreating tile: {file}  ");
+        tile.ContentUri = file;
+
+        int target_srs = 4978;
+
+        if (keepProjection) {
+            target_srs = source_epsg;
+        }
+
+        byte[] bytes = null;
+
+        List<GeometryRecord> geometries;
+        
+        if (useSizeBasedTiling) {
+            // For size-based tiling, filter to only include features large enough for this zoom level
+            geometries = GetGeometriesForZoomLevel(tile, where, target_srs, keepProjection);
+        }
+        else {
+            geometries = GeometryRepository.GetGeometrySubset(conn, inputTable.TableName, inputTable.GeometryColumn, tile.BoundingBox, source_epsg, target_srs, inputTable.ShadersColumn, inputTable.AttributeColumns, where, inputTable.RadiusColumn, keepProjection);
+        }
+
+        if (geometries.Count > 0) {
+
+            tile.Lod = lod;
+
+            if (!skipCreateTiles) {
+                bytes = TileWriter.ToTile(geometries, translation, copyright: copyright, addOutlines: stylingSettings.AddOutlines, defaultColor: stylingSettings.DefaultColor, defaultMetallicRoughness: stylingSettings.DefaultMetallicRoughness, doubleSided: stylingSettings.DoubleSided, defaultAlphaMode: stylingSettings.DefaultAlphaMode, alphaCutoff: stylingSettings.AlphaCutoff, createGltf: createGltf);
+                File.WriteAllBytes($"{outputFolder}{Path.AltDirectorySeparatorChar}{file}", bytes);
+            }
+            if (inputTable.LodColumn != String.Empty) {
+                if (lod < lods.Max()) {
+                    // take the next lod
+                    var currentIndex = lods.FindIndex(p => p == lod);
+                    var nextIndex = currentIndex + 1;
+                    var nextLod = lods[nextIndex];
+                    // make a copy of the tile 
+                    var t2 = new Tile(tile.Z, tile.X, tile.Y);
+                    t2.BoundingBox = tile.BoundingBox;
+                    var lodNextTiles = GenerateTiles(new BoundingBox(tile.BoundingBox[0], tile.BoundingBox[1], tile.BoundingBox[2], tile.BoundingBox[3]), t2, new List<Tile>(), nextLod, createGltf, keepProjection);
+                    tile.Children = lodNextTiles;
+                };
+            }
+
+            // next code is used to fix geometries that have centroid in the tile, but some parts outside...
+            var bbox_geometries = GeometryRepository.GetGeometriesBoundingBox(conn, inputTable.TableName, inputTable.GeometryColumn, source_epsg, tile, where, keepProjection);
+            var bbox_tile = new double[] { bbox_geometries[0], bbox_geometries[1], bbox_geometries[2], bbox_geometries[3] };
+            tile.BoundingBox = bbox_tile;
+            tile.ZMin = bbox_geometries[4];
+            tile.ZMax = bbox_geometries[5];
+
+            tile.Available = true;
+
+            if (skipCreateTiles) { tile.Available = true; }
+        }
+        else {
+            tile.Available = false;
+        }
+        tiles.Add(tile);
+    }
+
+    /// <summary>
+    /// Gets geometries filtered by size - only returns features that are large enough for the current zoom level.
+    /// </summary>
+    private List<GeometryRecord> GetGeometriesForZoomLevel(Tile tile, string where, int target_srs, bool keepProjection)
+    {
+        var tileDiagonal = ZoomLevelCalculator.CalculateDiagonal(tile.BoundingBox[0], tile.BoundingBox[1], tile.BoundingBox[2], tile.BoundingBox[3]);
+        var minSize = tileDiagonal * minFeatureSizeRatio;
+
+        // Get all geometries in the bounding box
+        var allGeometries = GeometryRepository.GetGeometrySubset(conn, inputTable.TableName, inputTable.GeometryColumn, tile.BoundingBox, source_epsg, target_srs, inputTable.ShadersColumn, inputTable.AttributeColumns, where, inputTable.RadiusColumn, keepProjection);
+
+        // Filter to only include geometries large enough for this zoom level
+        var filteredGeometries = new List<GeometryRecord>();
+        var newBatchId = 0;
+
+        foreach (var geom in allGeometries) {
+            var geomBbox = geom.Geometry.GetBoundingBox();
+            if (geomBbox != null) {
+                var geomDiagonal = ZoomLevelCalculator.CalculateDiagonal(
+                    geomBbox.XMin, geomBbox.YMin, geomBbox.XMax, geomBbox.YMax);
+                
+                if (geomDiagonal >= minSize) {
+                    // Update batch ID for filtered geometries
+                    geom.BatchId = newBatchId;
+                    filteredGeometries.Add(geom);
+                    newBatchId++;
+                }
+            }
+            else {
+                // If we can't determine size, include it
+                geom.BatchId = newBatchId;
+                filteredGeometries.Add(geom);
+                newBatchId++;
+            }
+        }
+
+        return filteredGeometries;
     }
 }

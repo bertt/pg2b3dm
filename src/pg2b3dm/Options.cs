@@ -59,6 +59,9 @@ public class Options
     [Option("max_features_per_tile", Required = false, Default = 1000, HelpText = "maximum features per tile")]
     public int MaxFeaturesPerTile { get; set; }
 
+    [Option("min_feature_size", Required = false, Default = 0.0, HelpText = "Minimum feature size ratio (0-1) for size-based tiling. When > 0, uses tippecanoe-style tiling where larger features appear at lower zoom levels. Value represents minimum feature diagonal as fraction of tile diagonal (e.g., 0.01 = 1%).")]
+    public double MinFeatureSizeRatio { get; set; }
+
     [Option('l', "lodcolumn", Required = false, Default = "", HelpText = "LOD column")]
     public string LodColumn { get; set; }
 

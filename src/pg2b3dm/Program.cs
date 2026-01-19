@@ -185,6 +185,10 @@ class Program
                     bbox.ToRadians().ToRegion(zmin, zmax);
 
             Console.WriteLine($"Maximum features per tile: " + maxFeaturesPerTile);
+            if (o.MinFeatureSizeRatio > 0) {
+                Console.WriteLine($"Size-based tiling enabled (tippecanoe-style)");
+                Console.WriteLine($"Minimum feature size ratio: {o.MinFeatureSizeRatio}");
+            }
 
             var crs = keepProjection ? $"EPSG:{source_epsg}" : "";
             Console.WriteLine($"Start generating tiles...");
@@ -223,6 +227,7 @@ class Program
             tilingSettings.SkipCreateTiles = skipCreateTiles;
             tilingSettings.MaxFeaturesPerTile = maxFeaturesPerTile;
             tilingSettings.Lods = lods;
+            tilingSettings.MinFeatureSizeRatio = o.MinFeatureSizeRatio;
 
             if (subdivisionScheme == SubdivisionScheme.QUADTREE) {
                 QuadtreeTile(connectionString, inputTable, stylingSettings, tilesetSettings, tilingSettings);
@@ -278,7 +283,7 @@ class Program
         tile.BoundingBox = bbox.ToArray();
         var outputSettings = tilesetSettings.OutputSettings;
 
-        var quadtreeTiler = new QuadtreeTiler(connectionString, inputTable, stylingSettings, tilingSettings.MaxFeaturesPerTile, tilesetSettings.Translation, outputSettings.ContentFolder, tilingSettings.Lods, tilesetSettings.Copyright, tilingSettings.SkipCreateTiles);
+        var quadtreeTiler = new QuadtreeTiler(connectionString, inputTable, stylingSettings, tilingSettings.MaxFeaturesPerTile, tilesetSettings.Translation, outputSettings.ContentFolder, tilingSettings.Lods, tilesetSettings.Copyright, tilingSettings.SkipCreateTiles, tilingSettings.MinFeatureSizeRatio);
         var tiles = quadtreeTiler.GenerateTiles(bbox, tile, new List<Tile>(), inputTable.LodColumn != string.Empty ? tilingSettings.Lods.First() : 0, tilingSettings.CreateGltf, tilingSettings.KeepProjection);
         Console.WriteLine();
         Console.WriteLine("Tiles created: " + tiles.Count(tile => tile.Available));
