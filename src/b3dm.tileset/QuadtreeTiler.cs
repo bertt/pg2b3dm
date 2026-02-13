@@ -54,33 +54,55 @@ public class QuadtreeTiler
             tile.Available = false;
             tiles.Add(tile);
         }
-        else if (numberOfFeatures > maxFeaturesPerTile) {
-            tile.Available = false;
-            tiles.Add(tile);
-
-            var z = tile.Z + 1;
-
-            // split in quadtree
-            for (var x = 0; x < 2; x++) {
-                for (var y = 0; y < 2; y++) {
-                    var dx = (bbox.XMax - bbox.XMin) / 2;
-                    var dy = (bbox.YMax - bbox.YMin) / 2;
-
-                    var xstart = bbox.XMin + dx * x;
-                    var ystart = bbox.YMin + dy * y;
-                    var xend = xstart + dx;
-                    var yend = ystart + dy;
-
-                    var bboxQuad = new BoundingBox(xstart, ystart, xend, yend);
-                    var new_tile = new Tile(z, tile.X * 2 + x, tile.Y * 2 + y);
-                    new_tile.BoundingBox = bboxQuad.ToArray();
-                    GenerateTiles(bboxQuad, new_tile, tiles, lod, createGltf, keepProjection);
+        else {
+            var shouldSplit = false;
+            
+            // Original logic: split if too many features
+            if (numberOfFeatures > maxFeaturesPerTile) {
+                shouldSplit = true;
+            }
+            // New logic: also consider object size, but only when there are multiple features.
+            // This prevents very large objects mixed with small objects from all being 
+            // rendered at the same z-level.
+            else if (numberOfFeatures > 1) {  // Only apply size-based splitting when multiple features exist
+                var maxObjectSize = FeatureCountRepository.GetMaxObjectSizeInBox(conn, inputTable.TableName, inputTable.GeometryColumn, new Point(bbox.XMin, bbox.YMin), new Point(bbox.XMax, bbox.YMax), where, source_epsg, keepProjection);
+                var tileSize = Math.Max(bbox.XMax - bbox.XMin, bbox.YMax - bbox.YMin);
+                
+                // If an object is much larger than the tile, consider splitting
+                // This pushes large objects to be visible at lower (earlier) zoom levels
+                // while smaller objects only appear at higher (later) zoom levels
+                if (maxObjectSize > tileSize) {
+                    shouldSplit = true;
                 }
             }
-        }
-        else {
+            
+            if (shouldSplit) {
+                tile.Available = false;
+                tiles.Add(tile);
 
-            var file = $"{tile.Z}_{tile.X}_{tile.Y}";
+                var z = tile.Z + 1;
+
+                // split in quadtree
+                for (var x = 0; x < 2; x++) {
+                    for (var y = 0; y < 2; y++) {
+                        var dx = (bbox.XMax - bbox.XMin) / 2;
+                        var dy = (bbox.YMax - bbox.YMin) / 2;
+
+                        var xstart = bbox.XMin + dx * x;
+                        var ystart = bbox.YMin + dy * y;
+                        var xend = xstart + dx;
+                        var yend = ystart + dy;
+
+                        var bboxQuad = new BoundingBox(xstart, ystart, xend, yend);
+                        var new_tile = new Tile(z, tile.X * 2 + x, tile.Y * 2 + y);
+                        new_tile.BoundingBox = bboxQuad.ToArray();
+                        GenerateTiles(bboxQuad, new_tile, tiles, lod, createGltf, keepProjection);
+                    }
+                }
+            }
+            else {
+
+                var file = $"{tile.Z}_{tile.X}_{tile.Y}";
             if (inputTable.LodColumn != String.Empty) {
                 file += $"_{lod}";
             }
@@ -137,6 +159,7 @@ public class QuadtreeTiler
                 tile.Available = false;
             }
             tiles.Add(tile);
+            }
         }
 
         return tiles;
